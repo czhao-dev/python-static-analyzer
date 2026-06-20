@@ -4,6 +4,8 @@ A lightweight Python static analyzer for finding common code quality, correctnes
 
 It scans `.py` files with the `ast` module (no execution of your code), reports file-and-line diagnostics with stable rule IDs, and exits non-zero when it finds something — so it works as a local check or a CI gate.
 
+> **Rust port available.** This project is being migrated to Rust for distribution as a single, dependency-free binary. The original Python implementation below remains the reference implementation during the transition; see [Rust Port](#rust-port) for the new implementation, its test results, and parity verification against this Python version.
+
 ## Implemented Checks
 
 | Rule    | Description |
@@ -183,6 +185,55 @@ src/static_analyzer/rules/unused_imports.py:48: SA005 Function `check` has cyclo
 2 issue(s) found.
 ```
 
+## Rust Port
+
+A Rust port lives in [`rust/`](rust/) and is a behavioral drop-in replacement for the Python CLI above: same 9 rules, same rule IDs and diagnostic messages, same CLI flags, same `pyproject.toml` config semantics, same default excludes, and the same sorted, line-oriented output format and exit codes (`0`/`1`/`2`).
+
+It uses [`rustpython-ruff_python_ast`/`rustpython-ruff_python_parser`](https://crates.io/crates/rustpython-ruff_python_ast) (an actively-maintained mirror of ruff's internal Python AST/parser crates) instead of the unmaintained `rustpython-parser`, giving a CPython-shaped AST with an official visitor module to walk it.
+
+### Building and running
+
+```bash
+cd rust
+cargo build --release
+./target/release/static-analyzer scan path/to/project
+```
+
+The CLI surface (subcommand, flags, exit codes) is identical to the Python version documented above.
+
+### Test results
+
+59 tests pass — 52 unit tests (rule logic, config loading, fnmatch, file discovery) plus 7 integration tests (CLI behavior and a byte-for-byte golden-output comparison against the Python implementation):
+
+```text
+$ cargo test
+...
+test result: ok. 52 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/analyzer.rs)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/cli.rs)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/golden.rs)
+```
+
+### Parity verification
+
+Beyond the unit/integration tests, the Rust binary's output was diffed directly against the Python CLI (`python -m static_analyzer scan <dir> --no-config`) across every directory in this repository — `src/`, `tests/`, and `examples/` — on both stdout and stderr. All three are byte-for-byte identical:
+
+```text
+$ diff <(python -m static_analyzer scan src --no-config) <(./rust/target/release/static-analyzer scan src --no-config)
+(no output — identical)
+
+src/static_analyzer/rules/missing_return.py:38: SA005 Function `_stmt_always_exits` has cyclomatic complexity 16 (threshold 10)
+src/static_analyzer/rules/unused_imports.py:48: SA005 Function `check` has cyclomatic complexity 12 (threshold 10)
+
+2 issue(s) found.
+```
+
+Porting surfaced a few real differences between CPython's `ast` module and ruff's AST shape that needed deliberate handling (not just mechanical translation):
+
+- **Elif chains.** CPython represents `elif` as a nested `ast.If` in `orelse`; ruff flattens `if`/`elif`/`else` into a single `elif_else_clauses` list. This changed how [`SA005`](rust/src/rules/sa005_complexity.rs) counts decision points (each `elif` still counts, but isn't a separate node) and how [`SA008`](rust/src/rules/sa008_missing_return.rs) determines exhaustiveness (an `if`/`elif` chain with no trailing `else` is not exhaustive, even if every existing branch returns — a case the original Python test suite didn't cover, now added as a regression test).
+- **Double-visit quirk.** Ruff's generated statement visitor visits each `elif` clause's test expression twice (once explicitly, once again inside its own clause walker). [`SA005`](rust/src/rules/sa005_complexity.rs) drives `elif` traversal manually to avoid double-counting boolean operators living in an `elif` condition.
+- **[`SA007`](rust/src/rules/sa007_nesting.rs) nesting** actually got simpler: CPython's `ast` can't structurally distinguish a true `elif` from `else:` followed by a nested `if` at the same source column (the Python implementation uses a column-offset heuristic for this). Ruff's `elif_else_clauses` distinguish them directly via `test: Option<Expr>` (`Some` for `elif`, `None` for `else`), so the Rust port doesn't need the heuristic at all.
+
 ## Roadmap
 
 - [x] Add project packaging with `pyproject.toml`.
@@ -194,6 +245,8 @@ src/static_analyzer/rules/unused_imports.py:48: SA005 Function `check` has cyclo
 - [x] Add configuration support.
 - [x] Add CI-friendly exit codes.
 - [ ] Add JSON output for editor and automation integrations.
+- [x] Port the analyzer to Rust as a dependency-free single binary (see [Rust Port](#rust-port)).
+- [ ] Cut over to the Rust implementation as canonical and retire the Python source, once the port has had time to bake.
 
 ## License
 
