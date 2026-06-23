@@ -2,9 +2,7 @@
 
 A lightweight C static analyzer for finding common code quality, correctness, and maintainability issues before runtime.
 
-It parses `.c`/`.h` files with [tree-sitter](https://tree-sitter.github.io/tree-sitter/) and the `tree-sitter-c` grammar (no compilation or execution of your code), reports file-and-line diagnostics with stable rule IDs, and exits non-zero when it finds something — so it works as a local check or a CI gate.
-
-> **Rust port available.** This project is being migrated to Rust for distribution as a single, dependency-free binary. The original Python implementation below remains the reference implementation during the transition; see [Rust Port](#rust-port) for the new implementation, its test results, and parity verification against this Python version.
+It parses `.c`/`.h` files with [tree-sitter](https://tree-sitter.github.io/tree-sitter/) and the `tree-sitter-c` grammar (no compilation or execution of your code), reports file-and-line diagnostics with stable rule IDs, and exits non-zero when it finds something — so it works as a local check or a CI gate. It builds to a single, dependency-free binary.
 
 ## Implemented Checks
 
@@ -39,17 +37,14 @@ example.c:1: SA004 Function `classify` may not return a value on all code paths
 ## Installation
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+cargo build --release
+# binary at ./target/release/c-static-analyzer
 ```
 
 ## Usage
 
 ```bash
 c-static-analyzer scan path/to/project
-# or, without installing a console script:
-python -m c_static_analyzer scan path/to/project
 ```
 
 Example output:
@@ -95,58 +90,62 @@ Project structure:
 ```text
 c-static-analyzer/
 ├── README.md
-├── pyproject.toml
+├── Cargo.toml
 ├── examples/
 │   └── sample_issues.c
 ├── src/
-│   └── c_static_analyzer/
-│       ├── __init__.py
-│       ├── __main__.py
-│       ├── cli.py
-│       ├── analyzer.py
-│       ├── config.py
-│       ├── diagnostics.py
-│       └── rules/
-│           ├── __init__.py
-│           ├── complexity.py
-│           ├── unused_variables.py
-│           ├── nesting.py
-│           ├── missing_return.py
-│           └── unreachable_code.py
+│   ├── main.rs
+│   ├── lib.rs
+│   ├── cli.rs
+│   ├── analyzer.rs
+│   ├── visitor.rs
+│   ├── config.rs
+│   ├── diagnostics.rs
+│   ├── fnmatch.rs
+│   └── rules/
+│       ├── mod.rs
+│       ├── sa001_complexity.rs
+│       ├── sa002_unused_variables.rs
+│       ├── sa003_nesting.rs
+│       ├── sa004_missing_return.rs
+│       └── sa005_unreachable_code.rs
 └── tests/
-    ├── test_analyzer.py
-    ├── test_cli.py
-    └── test_*.py  (one file per rule)
+    ├── analyzer.rs
+    ├── cli.rs
+    └── golden.rs
 ```
 
 Development commands:
 
 ```bash
-pip install -e ".[dev]"
-pytest
-c-static-analyzer scan examples/
+cargo build --release
+cargo test
+./target/release/c-static-analyzer scan examples/
 ```
 
 ## Design
 
-The analyzer uses [tree-sitter](https://tree-sitter.github.io/tree-sitter/) with the `tree-sitter-c` grammar:
+The analyzer uses [tree-sitter](https://tree-sitter.github.io/tree-sitter/) with the `tree-sitter-c` grammar via the [`tree-sitter`](https://crates.io/crates/tree-sitter) and [`tree-sitter-c`](https://crates.io/crates/tree-sitter-c) crates:
 
 1. Parse each `.c`/`.h` file into a concrete syntax tree.
-2. Run each enabled rule's `check(tree, source, path, config)` function over the tree.
+2. Run each enabled rule over the tree, walking `tree_sitter::Node`s with `child_by_field_name`.
 3. Collect diagnostics with rule IDs, messages, file paths, and line numbers.
 4. Sort and render results in a human-readable CLI format.
 5. Exit with a non-zero status when findings are present, making the tool usable in CI.
 
-Each rule lives in its own module under `src/c_static_analyzer/rules/` and exposes a `RULE_ID` and a `check()` function, so adding a new rule means adding one file and registering it in `rules/__init__.py`.
+Each rule lives in its own module under `src/rules/` and exposes a rule ID and a check function, so adding a new rule means adding one file and registering it in `rules/mod.rs`.
 
 ## Test Results
 
-The project ships with 32 unit and end-to-end tests covering every rule plus the CLI:
+44 tests pass — 36 unit tests (rule logic, config loading, fnmatch, file discovery) plus 8 integration tests (CLI behavior and a byte-for-byte golden-output comparison against the project's reference fixture):
 
 ```text
-$ pytest -q
-................................
-32 passed in 0.03s
+$ cargo test
+...
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/analyzer.rs)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/cli.rs)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/golden.rs)
 ```
 
 Running the analyzer on [examples/sample_issues.c](examples/sample_issues.c), a file written specifically to trigger every rule, confirms end-to-end behavior:
@@ -162,50 +161,9 @@ examples/sample_issues.c:45: SA005 Unreachable code after `return`
 5 issue(s) found.
 ```
 
-## Rust Port
-
-A Rust port lives in [`rust/`](rust/) and is a behavioral drop-in replacement for the Python CLI above: same 5 rules, same rule IDs and diagnostic messages, same CLI flags, same `.c-static-analyzer.toml` config semantics, same default excludes, and the same sorted, line-oriented output format and exit codes (`0`/`1`/`2`).
-
-It uses the [`tree-sitter`](https://crates.io/crates/tree-sitter) and [`tree-sitter-c`](https://crates.io/crates/tree-sitter-c) crates — the same parser and grammar as the Python implementation, just through their native Rust bindings.
-
-### Building and running
-
-```bash
-cd rust
-cargo build --release
-./target/release/c-static-analyzer scan path/to/project
-```
-
-The CLI surface (subcommand, flags, exit codes) is identical to the Python version documented above.
-
-### Test results
-
-44 tests pass — 36 unit tests (rule logic, config loading, fnmatch, file discovery) plus 8 integration tests (CLI behavior and a byte-for-byte golden-output comparison against the Python implementation):
-
-```text
-$ cargo test
-...
-test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/analyzer.rs)
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/cli.rs)
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/golden.rs)
-```
-
-### Parity verification
-
-Beyond the unit/integration tests, the Rust binary's output was diffed directly against the Python CLI (`c-static-analyzer scan <dir> --no-config`) on `examples/sample_issues.c` and against the Python source tree (`src/`) — both byte-for-byte identical on stdout and stderr:
-
-```text
-$ diff <(python -m c_static_analyzer scan examples/sample_issues.c --no-config) \
-       <(./rust/target/release/c-static-analyzer scan examples/sample_issues.c --no-config)
-(no output — identical)
-```
-
-Since standard C has no nested function definitions, the Rust port's rule logic is a much more direct translation of the Python implementation than the earlier Python-analyzing version was: each rule walks `tree_sitter::Node`s with `child_by_field_name` instead of matching on `ast` node variants, but the underlying algorithms (complexity scoring, break/exit-path analysis, nesting depth tracking) are unchanged.
-
 ## Roadmap
 
-- [x] Add project packaging with `pyproject.toml`.
+- [x] Add project packaging with `Cargo.toml`.
 - [x] Implement the CLI entry point.
 - [x] Implement tree-sitter parsing for C files.
 - [x] Add diagnostic formatting.
@@ -213,8 +171,6 @@ Since standard C has no nested function definitions, the Rust port's rule logic 
 - [x] Add configuration support.
 - [x] Add CI-friendly exit codes.
 - [ ] Add JSON output for editor and automation integrations.
-- [x] Port the analyzer to Rust as a dependency-free single binary (see [Rust Port](#rust-port)).
-- [ ] Cut over to the Rust implementation as canonical and retire the Python source, once the port has had time to bake.
 
 ## License
 

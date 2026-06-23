@@ -1,10 +1,11 @@
 use assert_cmd::Command;
 
-/// Captured from `c-static-analyzer scan examples/sample_issues.c
-/// --no-config` against the Python implementation — verifies the Rust port
-/// is byte-for-byte equivalent on the project's reference fixture.
+/// Frozen output of `c-static-analyzer scan examples/sample_issues.c
+/// --no-config`, originally captured from the (now-retired) Python
+/// implementation to verify byte-for-byte parity during the Rust port.
+/// Kept as a regression fixture for the reference example file.
 #[test]
-fn matches_python_output_on_sample_issues() {
+fn matches_reference_output_on_sample_issues() {
     let expected_stdout = "\
 examples/sample_issues.c:3: SA001 Function `complex_calc` has cyclomatic complexity 12 (threshold 10)
 examples/sample_issues.c:18: SA004 Function `classify` may not return a value on all code paths
