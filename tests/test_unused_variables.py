@@ -1,58 +1,76 @@
 from helpers import parse
 
-from static_analyzer.rules import unused_variables
+from c_static_analyzer.rules import unused_variables
 
 
 def test_flags_unused_local_variable(config):
-    tree = parse(
+    tree, source = parse(
         """
-def compute():
-    total = 0
-    unused = 42
-    return total
+int compute(void) {
+    int total = 0;
+    int unused = 42;
+    return total;
+}
 """
     )
-    diagnostics = unused_variables.check(tree, "example.py", config)
+    diagnostics = unused_variables.check(tree, source, "example.c", config)
     assert len(diagnostics) == 1
     assert "unused" in diagnostics[0].message
-    assert diagnostics[0].rule_id == "SA006"
+    assert diagnostics[0].rule_id == "SA002"
 
 
 def test_ignores_used_variable(config):
-    tree = parse(
+    tree, source = parse(
         """
-def compute():
-    total = 0
-    for item in range(10):
-        total += item
-    return total
+int compute(void) {
+    int total = 0;
+    for (int i = 0; i < 10; i++) {
+        total += i;
+    }
+    return total;
+}
 """
     )
-    diagnostics = unused_variables.check(tree, "example.py", config)
+    diagnostics = unused_variables.check(tree, source, "example.c", config)
     assert diagnostics == []
 
 
 def test_ignores_underscore_prefixed(config):
-    tree = parse(
+    tree, source = parse(
         """
-def compute():
-    _ignored = expensive_call()
-    return 1
+int compute(void) {
+    int _ignored = expensive_call();
+    return 1;
+}
 """
     )
-    diagnostics = unused_variables.check(tree, "example.py", config)
+    diagnostics = unused_variables.check(tree, source, "example.c", config)
     assert diagnostics == []
 
 
-def test_ignores_global_declarations(config):
-    tree = parse(
+def test_ignores_global_variable_mutation(config):
+    tree, source = parse(
         """
-counter = 0
+int counter = 0;
 
-def increment():
-    global counter
-    counter = counter + 1
+void increment(void) {
+    counter = counter + 1;
+}
 """
     )
-    diagnostics = unused_variables.check(tree, "example.py", config)
+    diagnostics = unused_variables.check(tree, source, "example.c", config)
+    assert diagnostics == []
+
+
+def test_array_size_and_initializer_count_as_use(config):
+    tree, source = parse(
+        """
+int compute(int n) {
+    int size = n;
+    int values[size];
+    return values[0];
+}
+"""
+    )
+    diagnostics = unused_variables.check(tree, source, "example.c", config)
     assert diagnostics == []

@@ -6,7 +6,7 @@ use crate::analyzer::analyze_paths;
 use crate::config::{load_config, Config};
 
 #[derive(Parser)]
-#[command(name = "static-analyzer", version)]
+#[command(name = "c-static-analyzer", version)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -14,7 +14,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Scan Python files for issues
+    /// Scan C files for issues
     Scan(ScanArgs),
 }
 
@@ -39,7 +39,7 @@ struct ScanArgs {
     #[arg(long = "exclude", value_name = "PATTERN")]
     exclude: Vec<String>,
 
-    /// Ignore pyproject.toml configuration
+    /// Ignore .c-static-analyzer.toml configuration
     #[arg(long = "no-config")]
     no_config: bool,
 }

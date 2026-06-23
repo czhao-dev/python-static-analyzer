@@ -1,3 +1,3 @@
 fn main() {
-    std::process::exit(static_analyzer::cli::run());
+    std::process::exit(c_static_analyzer::cli::run());
 }

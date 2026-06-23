@@ -1,4 +1,4 @@
-"""Command-line entry point: `static-analyzer scan <paths>`."""
+"""Command-line entry point: `c-static-analyzer scan <paths>`."""
 
 from __future__ import annotations
 
@@ -6,17 +6,17 @@ import argparse
 import sys
 from pathlib import Path
 
-from static_analyzer import __version__
-from static_analyzer.analyzer import analyze_paths
-from static_analyzer.config import Config, load_config
+from c_static_analyzer import __version__
+from c_static_analyzer.analyzer import analyze_paths
+from c_static_analyzer.config import Config, load_config
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="static-analyzer")
+    parser = argparse.ArgumentParser(prog="c-static-analyzer")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
-    scan = subparsers.add_parser("scan", help="Scan Python files for issues")
+    scan = subparsers.add_parser("scan", help="Scan C files for issues")
     scan.add_argument("paths", nargs="*", default=["."], help="Files or directories to scan")
     scan.add_argument("--max-complexity", type=int, default=None, help="Cyclomatic complexity threshold")
     scan.add_argument("--max-nesting", type=int, default=None, help="Control flow nesting depth threshold")
@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Glob pattern to exclude; can be passed multiple times",
     )
-    scan.add_argument("--no-config", action="store_true", help="Ignore pyproject.toml configuration")
+    scan.add_argument("--no-config", action="store_true", help="Ignore .c-static-analyzer.toml configuration")
     return parser
 
 

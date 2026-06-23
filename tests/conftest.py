@@ -1,6 +1,6 @@
 import pytest
 
-from static_analyzer.config import Config
+from c_static_analyzer.config import Config
 
 
 @pytest.fixture

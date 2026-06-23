@@ -3,16 +3,17 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "static-analyzer"
+name = "c-static-analyzer"
 version = "0.1.0"
-description = "A lightweight Python static analyzer for finding common code quality, correctness, and maintainability issues before runtime."
+description = "A lightweight C static analyzer for finding common code quality, correctness, and maintainability issues before runtime."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 authors = [{ name = "Charles Zhao" }]
+dependencies = ["tree-sitter>=0.21", "tree-sitter-c>=0.21"]
 
 [project.scripts]
-static-analyzer = "static_analyzer.cli:main"
+c-static-analyzer = "c_static_analyzer.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
@@ -22,9 +23,3 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
-[tool.static-analyzer]
-exclude = []
-max_complexity = 10
-max_nesting = 4
-enabled_rules = []

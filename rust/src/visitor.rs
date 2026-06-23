@@ -1,74 +1,36 @@
 //! Shared traversal helpers reused across multiple rules.
 
-use rustpython_ruff_python_ast::visitor::{walk_expr, walk_stmt, Visitor};
-use rustpython_ruff_python_ast::{Expr, Stmt};
-use rustpython_ruff_source_file::SourceCode;
-use rustpython_ruff_text_size::TextSize;
+use tree_sitter::Node;
 
-pub use rustpython_ruff_text_size::Ranged;
-
-/// 1-indexed line, 0-indexed column — matches CPython ast's `(lineno, col_offset)`.
-pub fn loc(source: &SourceCode<'_, '_>, offset: TextSize) -> (usize, usize) {
-    let lc = source.line_column(offset);
-    (lc.line.get(), lc.column.get() - 1)
+/// 1-indexed line, 0-indexed column — matches tree-sitter's `Point` (both
+/// 0-indexed) shifted to the same convention the Python implementation uses.
+pub fn loc(node: &Node) -> (usize, usize) {
+    let point = node.start_position();
+    (point.row + 1, point.column)
 }
 
-/// Statements reachable from `stmts` without crossing into a nested
-/// function/lambda scope. Mirrors most rules' `_NESTED_SCOPES = (FunctionDef,
-/// AsyncFunctionDef, Lambda)` — notably this does NOT stop at `ClassDef`,
-/// matching `complexity.py`/`nesting.py`/`missing_return.py`. `SA006`
-/// (`unused_variables.py`) is the one rule whose `_NESTED_SCOPES` also
-/// includes `ClassDef`; it implements its own boundary rather than reusing this.
-pub fn own_scope_stmts(stmts: &[Stmt]) -> Vec<&Stmt> {
-    struct Collector<'a> {
-        out: Vec<&'a Stmt>,
+/// Every descendant of `node`, depth-first, including `node` itself.
+pub fn walk<'a>(node: Node<'a>, out: &mut Vec<Node<'a>>) {
+    out.push(node);
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk(child, out);
     }
-    impl<'a> Visitor<'a> for Collector<'a> {
-        fn visit_stmt(&mut self, stmt: &'a Stmt) {
-            if matches!(stmt, Stmt::FunctionDef(_)) {
-                return;
-            }
-            self.out.push(stmt);
-            walk_stmt(self, stmt);
-        }
-        fn visit_expr(&mut self, expr: &'a Expr) {
-            if matches!(expr, Expr::Lambda(_)) {
-                return;
-            }
-            walk_expr(self, expr);
-        }
-    }
-    let mut collector = Collector { out: Vec::new() };
-    for stmt in stmts {
-        collector.visit_stmt(stmt);
-    }
-    collector.out
 }
 
-/// Expressions reachable from `stmts` without crossing into a nested
-/// function/class/lambda scope.
-pub fn own_scope_exprs(stmts: &[Stmt]) -> Vec<&Expr> {
-    struct Collector<'a> {
-        out: Vec<&'a Expr>,
-    }
-    impl<'a> Visitor<'a> for Collector<'a> {
-        fn visit_stmt(&mut self, stmt: &'a Stmt) {
-            if matches!(stmt, Stmt::FunctionDef(_)) {
-                return;
-            }
-            walk_stmt(self, stmt);
+/// The declared name of a `function_definition` node, drilling through any
+/// `pointer_declarator`/`function_declarator` wrapping to find the identifier.
+pub fn function_name(func: &Node, source: &[u8]) -> String {
+    let mut declarator = func.child_by_field_name("declarator");
+    while let Some(node) = declarator {
+        if node.kind() == "function_declarator" {
+            return node
+                .child_by_field_name("declarator")
+                .and_then(|n| n.utf8_text(source).ok())
+                .unwrap_or("<anonymous>")
+                .to_string();
         }
-        fn visit_expr(&mut self, expr: &'a Expr) {
-            if matches!(expr, Expr::Lambda(_)) {
-                return;
-            }
-            self.out.push(expr);
-            walk_expr(self, expr);
-        }
+        declarator = node.child_by_field_name("declarator");
     }
-    let mut collector = Collector { out: Vec::new() };
-    for stmt in stmts {
-        collector.visit_stmt(stmt);
-    }
-    collector.out
+    "<anonymous>".to_string()
 }

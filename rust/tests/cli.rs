@@ -4,10 +4,10 @@ use predicates::prelude::*;
 #[test]
 fn scan_clean_file_exits_zero() {
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("clean.py");
-    std::fs::write(&file, "def add(a, b):\n    return a + b\n").unwrap();
+    let file = dir.path().join("clean.c");
+    std::fs::write(&file, "int add(int a, int b) {\n    return a + b;\n}\n").unwrap();
 
-    Command::cargo_bin("static-analyzer")
+    Command::cargo_bin("c-static-analyzer")
         .unwrap()
         .args(["scan", file.to_str().unwrap(), "--no-config"])
         .assert()
@@ -18,40 +18,40 @@ fn scan_clean_file_exits_zero() {
 #[test]
 fn scan_file_with_issues_exits_one() {
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("bad.py");
+    let file = dir.path().join("bad.c");
     std::fs::write(
         &file,
-        "def add_item(item, items=[]):\n    items.append(item)\n    return items\n",
+        "int classify(int x) {\n    if (x > 0) {\n        return 1;\n    }\n}\n",
     )
     .unwrap();
 
-    Command::cargo_bin("static-analyzer")
+    Command::cargo_bin("c-static-analyzer")
         .unwrap()
         .args(["scan", file.to_str().unwrap(), "--no-config"])
         .assert()
         .code(1)
-        .stdout(predicate::str::contains("SA001"))
+        .stdout(predicate::str::contains("SA004"))
         .stdout(predicate::str::contains(file.to_str().unwrap()));
 }
 
 #[test]
 fn select_filters_rules() {
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("bad.py");
+    let file = dir.path().join("bad.c");
     std::fs::write(
         &file,
-        "def add_item(item, items=[]):\n    items.append(item)\n    return items\n",
+        "int classify(int x) {\n    if (x > 0) {\n        return 1;\n    }\n}\n",
     )
     .unwrap();
 
-    Command::cargo_bin("static-analyzer")
+    Command::cargo_bin("c-static-analyzer")
         .unwrap()
         .args([
             "scan",
             file.to_str().unwrap(),
             "--no-config",
             "--select",
-            "SA005",
+            "SA001",
         ])
         .assert()
         .code(0)
@@ -60,9 +60,9 @@ fn select_filters_rules() {
 
 #[test]
 fn missing_path_exits_two() {
-    Command::cargo_bin("static-analyzer")
+    Command::cargo_bin("c-static-analyzer")
         .unwrap()
-        .args(["scan", "/no/such/path.py", "--no-config"])
+        .args(["scan", "/no/such/path.c", "--no-config"])
         .assert()
         .code(2);
 }

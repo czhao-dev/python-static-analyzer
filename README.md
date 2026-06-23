@@ -1,8 +1,8 @@
-# Python Static Analyzer
+# C Static Analyzer
 
-A lightweight Python static analyzer for finding common code quality, correctness, and maintainability issues before runtime.
+A lightweight C static analyzer for finding common code quality, correctness, and maintainability issues before runtime.
 
-It scans `.py` files with the `ast` module (no execution of your code), reports file-and-line diagnostics with stable rule IDs, and exits non-zero when it finds something — so it works as a local check or a CI gate.
+It parses `.c`/`.h` files with [tree-sitter](https://tree-sitter.github.io/tree-sitter/) and the `tree-sitter-c` grammar (no compilation or execution of your code), reports file-and-line diagnostics with stable rule IDs, and exits non-zero when it finds something — so it works as a local check or a CI gate.
 
 > **Rust port available.** This project is being migrated to Rust for distribution as a single, dependency-free binary. The original Python implementation below remains the reference implementation during the transition; see [Rust Port](#rust-port) for the new implementation, its test results, and parity verification against this Python version.
 
@@ -10,34 +10,30 @@ It scans `.py` files with the `ast` module (no execution of your code), reports 
 
 | Rule    | Description |
 |---------|--------------|
-| `SA001` | Mutable default argument, such as `def add_item(item, items=[])`. |
-| `SA002` | Unused import. |
-| `SA003` | Broad exception handler, such as `except Exception` or a bare `except:`. |
-| `SA004` | Built-in name shadowed, such as `list`, `dict`, or `id`. |
-| `SA005` | Function with high cyclomatic complexity. |
-| `SA006` | Unused local variable. |
-| `SA007` | Deeply nested control flow. |
-| `SA008` | Missing return path in a function that appears to return a value. |
-| `SA009` | Unreachable code after `return`, `raise`, `break`, or `continue`. |
+| `SA001` | Function with high cyclomatic complexity. |
+| `SA002` | Unused local variable. |
+| `SA003` | Deeply nested control flow. |
+| `SA004` | Missing return path in a non-void function. |
+| `SA005` | Unreachable code after `return`, `break`, `continue`, or `goto`. |
 
 ## Example
 
-Given this Python file:
+Given this C file:
 
-```python
-def collect(value, values=[]):
-    try:
-        values.append(value)
-        return values
-    except Exception:
-        return []
+```c
+const char *classify(int x) {
+    if (x > 0) {
+        return "positive";
+    } else if (x < 0) {
+        return "negative";
+    }
+}
 ```
 
 The analyzer reports:
 
 ```text
-example.py:1: SA001 Mutable default argument `values=[]`
-example.py:5: SA003 Broad exception handler `except Exception`
+example.c:1: SA004 Function `classify` may not return a value on all code paths
 ```
 
 ## Installation
@@ -51,60 +47,59 @@ pip install -e ".[dev]"
 ## Usage
 
 ```bash
-static-analyzer scan path/to/project
+c-static-analyzer scan path/to/project
 # or, without installing a console script:
-python -m static_analyzer scan path/to/project
+python -m c_static_analyzer scan path/to/project
 ```
 
 Example output:
 
 ```text
-src/app.py:12: SA001 Mutable default argument `items=[]`
-src/app.py:34: SA002 Unused import `json`
-src/service.py:48: SA003 Broad exception handler `except Exception`
+src/app.c:12: SA001 Function `parse_request` has cyclomatic complexity 14 (threshold 10)
+src/app.c:34: SA002 Local variable `unused` is assigned but never used
+src/util.c:48: SA004 Function `convert` may not return a value on all code paths
 ```
 
 The command exits `0` when no issues are found, `1` when diagnostics are reported, and `2` on a usage error (e.g. a path that doesn't exist) — making it suitable as a CI gate.
 
-By default the scanner skips common non-project directories (`.venv`, `venv`, `.git`, `__pycache__`, `build`, `dist`, `*.egg-info`, `.tox`, caches, `node_modules`).
+By default the scanner skips common non-project directories (`.git`, `build`, `dist`, `cmake-build-debug`, `cmake-build-release`, `CMakeFiles`, `out`, `vendor`, `third_party`).
 
 ### CLI options
 
 ```text
-static-analyzer scan [paths ...]
+c-static-analyzer scan [paths ...]
   --max-complexity N     Cyclomatic complexity threshold (default: 10)
   --max-nesting N        Control flow nesting depth threshold (default: 4)
   --select SA001,SA002   Only run these rule IDs (default: all rules)
   --exclude PATTERN       Glob pattern to exclude; repeatable
-  --no-config             Ignore pyproject.toml configuration
+  --no-config             Ignore .c-static-analyzer.toml configuration
 ```
 
 ## Configuration
 
-Settings can be set on the command line or in `pyproject.toml`:
+Settings can be set on the command line or in a `.c-static-analyzer.toml` file in (or above) the directory you're scanning from:
 
 ```toml
-[tool.static-analyzer]
 exclude = ["tests/fixtures/*"]
 max_complexity = 10
 max_nesting = 4
 enabled_rules = ["SA001", "SA002", "SA004"]
 ```
 
-`enabled_rules` defaults to an empty list, which means all rules are enabled. CLI flags override the values loaded from `pyproject.toml`.
+`enabled_rules` defaults to an empty list, which means all rules are enabled. CLI flags override the values loaded from `.c-static-analyzer.toml`.
 
 ## Development
 
 Project structure:
 
 ```text
-python-static-analyzer/
+c-static-analyzer/
 ├── README.md
 ├── pyproject.toml
 ├── examples/
-│   └── sample_issues.py
+│   └── sample_issues.c
 ├── src/
-│   └── static_analyzer/
+│   └── c_static_analyzer/
 │       ├── __init__.py
 │       ├── __main__.py
 │       ├── cli.py
@@ -113,12 +108,8 @@ python-static-analyzer/
 │       ├── diagnostics.py
 │       └── rules/
 │           ├── __init__.py
-│           ├── mutable_defaults.py
-│           ├── unused_imports.py
-│           ├── unused_variables.py
-│           ├── broad_exceptions.py
-│           ├── shadowed_builtins.py
 │           ├── complexity.py
+│           ├── unused_variables.py
 │           ├── nesting.py
 │           ├── missing_return.py
 │           └── unreachable_code.py
@@ -133,113 +124,90 @@ Development commands:
 ```bash
 pip install -e ".[dev]"
 pytest
-static-analyzer scan examples/
+c-static-analyzer scan examples/
 ```
 
 ## Design
 
-The analyzer uses Python's built-in `ast` module:
+The analyzer uses [tree-sitter](https://tree-sitter.github.io/tree-sitter/) with the `tree-sitter-c` grammar:
 
-1. Parse each `.py` file into an abstract syntax tree.
-2. Run each enabled rule's `check(tree, path, config)` function over the tree.
+1. Parse each `.c`/`.h` file into a concrete syntax tree.
+2. Run each enabled rule's `check(tree, source, path, config)` function over the tree.
 3. Collect diagnostics with rule IDs, messages, file paths, and line numbers.
 4. Sort and render results in a human-readable CLI format.
 5. Exit with a non-zero status when findings are present, making the tool usable in CI.
 
-Each rule lives in its own module under `src/static_analyzer/rules/` and exposes a `RULE_ID` and a `check()` function, so adding a new rule means adding one file and registering it in `rules/__init__.py`.
+Each rule lives in its own module under `src/c_static_analyzer/rules/` and exposes a `RULE_ID` and a `check()` function, so adding a new rule means adding one file and registering it in `rules/__init__.py`.
 
 ## Test Results
 
-The project ships with 43 unit and end-to-end tests covering every rule plus the CLI:
+The project ships with 32 unit and end-to-end tests covering every rule plus the CLI:
 
 ```text
 $ pytest -q
-...........................................
-43 passed in 0.03s
+................................
+32 passed in 0.03s
 ```
 
-Running the analyzer on [examples/sample_issues.py](examples/sample_issues.py), a file written specifically to trigger every rule, confirms end-to-end behavior:
+Running the analyzer on [examples/sample_issues.c](examples/sample_issues.c), a file written specifically to trigger every rule, confirms end-to-end behavior:
 
 ```text
-$ static-analyzer scan examples/sample_issues.py
-examples/sample_issues.py:1: SA002 Unused import `json`
-examples/sample_issues.py:2: SA002 Unused import `os`
-examples/sample_issues.py:5: SA001 Mutable default argument `values=[]`
-examples/sample_issues.py:9: SA003 Broad exception handler `except Exception`
-examples/sample_issues.py:13: SA004 Parameter `list` shadows a built-in name
-examples/sample_issues.py:14: SA006 Local variable `unused` is assigned but never used
-examples/sample_issues.py:18: SA008 Function `classify` may not return a value on all code paths
-examples/sample_issues.py:23: SA008 Function `first_even` may not return a value on all code paths
-examples/sample_issues.py:27: SA009 Unreachable code after `return`
+$ c-static-analyzer scan examples/sample_issues.c
+examples/sample_issues.c:3: SA001 Function `complex_calc` has cyclomatic complexity 12 (threshold 10)
+examples/sample_issues.c:18: SA004 Function `classify` may not return a value on all code paths
+examples/sample_issues.c:31: SA003 Control flow nested 5 levels deep (threshold 4)
+examples/sample_issues.c:41: SA002 Local variable `unused` is assigned but never used
+examples/sample_issues.c:45: SA005 Unreachable code after `return`
 
-9 issue(s) found.
-```
-
-Running the analyzer against its own source tree turns up only two honest complexity findings, on functions that are inherently branchy (a control-flow dispatcher and an import-resolution loop) — left as-is rather than artificially restructured to satisfy the linter:
-
-```text
-$ static-analyzer scan src
-src/static_analyzer/rules/missing_return.py:38: SA005 Function `_stmt_always_exits` has cyclomatic complexity 16 (threshold 10)
-src/static_analyzer/rules/unused_imports.py:48: SA005 Function `check` has cyclomatic complexity 12 (threshold 10)
-
-2 issue(s) found.
+5 issue(s) found.
 ```
 
 ## Rust Port
 
-A Rust port lives in [`rust/`](rust/) and is a behavioral drop-in replacement for the Python CLI above: same 9 rules, same rule IDs and diagnostic messages, same CLI flags, same `pyproject.toml` config semantics, same default excludes, and the same sorted, line-oriented output format and exit codes (`0`/`1`/`2`).
+A Rust port lives in [`rust/`](rust/) and is a behavioral drop-in replacement for the Python CLI above: same 5 rules, same rule IDs and diagnostic messages, same CLI flags, same `.c-static-analyzer.toml` config semantics, same default excludes, and the same sorted, line-oriented output format and exit codes (`0`/`1`/`2`).
 
-It uses [`rustpython-ruff_python_ast`/`rustpython-ruff_python_parser`](https://crates.io/crates/rustpython-ruff_python_ast) (an actively-maintained mirror of ruff's internal Python AST/parser crates) instead of the unmaintained `rustpython-parser`, giving a CPython-shaped AST with an official visitor module to walk it.
+It uses the [`tree-sitter`](https://crates.io/crates/tree-sitter) and [`tree-sitter-c`](https://crates.io/crates/tree-sitter-c) crates — the same parser and grammar as the Python implementation, just through their native Rust bindings.
 
 ### Building and running
 
 ```bash
 cd rust
 cargo build --release
-./target/release/static-analyzer scan path/to/project
+./target/release/c-static-analyzer scan path/to/project
 ```
 
 The CLI surface (subcommand, flags, exit codes) is identical to the Python version documented above.
 
 ### Test results
 
-59 tests pass — 52 unit tests (rule logic, config loading, fnmatch, file discovery) plus 7 integration tests (CLI behavior and a byte-for-byte golden-output comparison against the Python implementation):
+44 tests pass — 36 unit tests (rule logic, config loading, fnmatch, file discovery) plus 8 integration tests (CLI behavior and a byte-for-byte golden-output comparison against the Python implementation):
 
 ```text
 $ cargo test
 ...
-test result: ok. 52 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/analyzer.rs)
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/analyzer.rs)
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/cli.rs)
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/golden.rs)
 ```
 
 ### Parity verification
 
-Beyond the unit/integration tests, the Rust binary's output was diffed directly against the Python CLI (`python -m static_analyzer scan <dir> --no-config`) across every directory in this repository — `src/`, `tests/`, and `examples/` — on both stdout and stderr. All three are byte-for-byte identical:
+Beyond the unit/integration tests, the Rust binary's output was diffed directly against the Python CLI (`c-static-analyzer scan <dir> --no-config`) on `examples/sample_issues.c` and against the Python source tree (`src/`) — both byte-for-byte identical on stdout and stderr:
 
 ```text
-$ diff <(python -m static_analyzer scan src --no-config) <(./rust/target/release/static-analyzer scan src --no-config)
+$ diff <(python -m c_static_analyzer scan examples/sample_issues.c --no-config) \
+       <(./rust/target/release/c-static-analyzer scan examples/sample_issues.c --no-config)
 (no output — identical)
-
-src/static_analyzer/rules/missing_return.py:38: SA005 Function `_stmt_always_exits` has cyclomatic complexity 16 (threshold 10)
-src/static_analyzer/rules/unused_imports.py:48: SA005 Function `check` has cyclomatic complexity 12 (threshold 10)
-
-2 issue(s) found.
 ```
 
-Porting surfaced a few real differences between CPython's `ast` module and ruff's AST shape that needed deliberate handling (not just mechanical translation):
-
-- **Elif chains.** CPython represents `elif` as a nested `ast.If` in `orelse`; ruff flattens `if`/`elif`/`else` into a single `elif_else_clauses` list. This changed how [`SA005`](rust/src/rules/sa005_complexity.rs) counts decision points (each `elif` still counts, but isn't a separate node) and how [`SA008`](rust/src/rules/sa008_missing_return.rs) determines exhaustiveness (an `if`/`elif` chain with no trailing `else` is not exhaustive, even if every existing branch returns — a case the original Python test suite didn't cover, now added as a regression test).
-- **Double-visit quirk.** Ruff's generated statement visitor visits each `elif` clause's test expression twice (once explicitly, once again inside its own clause walker). [`SA005`](rust/src/rules/sa005_complexity.rs) drives `elif` traversal manually to avoid double-counting boolean operators living in an `elif` condition.
-- **[`SA007`](rust/src/rules/sa007_nesting.rs) nesting** actually got simpler: CPython's `ast` can't structurally distinguish a true `elif` from `else:` followed by a nested `if` at the same source column (the Python implementation uses a column-offset heuristic for this). Ruff's `elif_else_clauses` distinguish them directly via `test: Option<Expr>` (`Some` for `elif`, `None` for `else`), so the Rust port doesn't need the heuristic at all.
+Since standard C has no nested function definitions, the Rust port's rule logic is a much more direct translation of the Python implementation than the earlier Python-analyzing version was: each rule walks `tree_sitter::Node`s with `child_by_field_name` instead of matching on `ast` node variants, but the underlying algorithms (complexity scoring, break/exit-path analysis, nesting depth tracking) are unchanged.
 
 ## Roadmap
 
 - [x] Add project packaging with `pyproject.toml`.
 - [x] Implement the CLI entry point.
-- [x] Implement AST parsing for Python files.
-- [x] Add the first rule: mutable default arguments.
+- [x] Implement tree-sitter parsing for C files.
 - [x] Add diagnostic formatting.
 - [x] Add unit tests for each rule.
 - [x] Add configuration support.

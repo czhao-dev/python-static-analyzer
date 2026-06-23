@@ -1,24 +1,22 @@
 [package]
-name = "static-analyzer"
+name = "c-static-analyzer"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "static-analyzer"
+name = "c-static-analyzer"
 path = "src/main.rs"
 
 [lib]
-name = "static_analyzer"
+name = "c_static_analyzer"
 path = "src/lib.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
-rustpython-ruff_python_ast = "0.15.8"
-rustpython-ruff_python_parser = "0.15.8"
-rustpython-ruff_text_size = "0.15.8"
-rustpython-ruff_source_file = "0.15.8"
+tree-sitter = "0.26"
+tree-sitter-c = "0.24"
 
 [dev-dependencies]
 assert_cmd = "2"
