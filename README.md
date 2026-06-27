@@ -1,22 +1,51 @@
 # C Static Analyzer
 
-A lightweight C static analyzer for finding common code quality, correctness, and maintainability issues before runtime.
+A lightweight static analyzer for C code that catches common quality, correctness, and maintainability issues before runtime.
 
-It parses `.c`/`.h` files with [tree-sitter](https://tree-sitter.github.io/tree-sitter/) and the `tree-sitter-c` grammar (no compilation or execution of your code), reports file-and-line diagnostics with stable rule IDs, and exits non-zero when it finds something — so it works as a local check or a CI gate. It builds to a single, dependency-free binary.
+It parses `.c`/`.h` files using [tree-sitter](https://tree-sitter.github.io/tree-sitter/) — no compilation or execution of your code required. It reports file-and-line diagnostics with stable rule IDs, exits non-zero on findings, and ships as a single self-contained binary suitable for local use or CI.
 
-## Implemented Checks
+---
 
-| Rule    | Description |
-|---------|--------------|
-| `SA001` | Function with high cyclomatic complexity. |
-| `SA002` | Unused local variable. |
-| `SA003` | Deeply nested control flow. |
-| `SA004` | Missing return path in a non-void function. |
-| `SA005` | Unreachable code after `return`, `break`, `continue`, or `goto`. |
+## Table of Contents
 
-## Example
+- [Checks](#checks)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Architecture](#architecture)
+- [Development](#development)
+- [Test Results](#test-results)
+- [Roadmap](#roadmap)
+- [References](#references)
+- [License](#license)
 
-Given this C file:
+---
+
+## Checks
+
+| Rule | Severity | Description |
+|------|----------|-------------|
+| `SA001` | Warning | Function cyclomatic complexity exceeds threshold |
+| `SA002` | Warning | Local variable is assigned but never used |
+| `SA003` | Warning | Control flow nesting depth exceeds threshold |
+| `SA004` | Error   | Non-void function may not return a value on all paths |
+| `SA005` | Warning | Unreachable code after `return`, `break`, `continue`, or `goto` |
+
+---
+
+## Quick Start
+
+```bash
+# Build
+cargo build --release
+
+# Scan a directory or file
+./target/release/c-static-analyzer scan path/to/project
+```
+
+### Example
+
+Given this C snippet:
 
 ```c
 const char *classify(int x) {
@@ -30,80 +59,117 @@ const char *classify(int x) {
 
 The analyzer reports:
 
-```text
-example.c:1: SA004 Function `classify` may not return a value on all code paths
+```
+example.c:1: [SA004] Function `classify` may not return a value on all code paths
 ```
 
-## Installation
-
-```bash
-cargo build --release
-# binary at ./target/release/c-static-analyzer
-```
+---
 
 ## Usage
 
 ```bash
-c-static-analyzer scan path/to/project
-```
-
-Example output:
-
-```text
-src/app.c:12: SA001 Function `parse_request` has cyclomatic complexity 14 (threshold 10)
-src/app.c:34: SA002 Local variable `unused` is assigned but never used
-src/util.c:48: SA004 Function `convert` may not return a value on all code paths
-```
-
-The command exits `0` when no issues are found, `1` when diagnostics are reported, and `2` on a usage error (e.g. a path that doesn't exist) — making it suitable as a CI gate.
-
-By default the scanner skips common non-project directories (`.git`, `build`, `dist`, `cmake-build-debug`, `cmake-build-release`, `CMakeFiles`, `out`, `vendor`, `third_party`).
-
-### CLI options
-
-```text
 c-static-analyzer scan [paths ...]
-  --max-complexity N     Cyclomatic complexity threshold (default: 10)
-  --max-nesting N        Control flow nesting depth threshold (default: 4)
-  --select SA001,SA002   Only run these rule IDs (default: all rules)
-  --exclude PATTERN       Glob pattern to exclude; repeatable
-  --no-config             Ignore .c-static-analyzer.toml configuration
 ```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--max-complexity N` | `10` | Cyclomatic complexity threshold |
+| `--max-nesting N` | `4` | Control flow nesting depth threshold |
+| `--select SA001,SA002` | all | Run only the specified rule IDs |
+| `--exclude PATTERN` | — | Glob pattern to exclude (repeatable) |
+| `--no-config` | — | Ignore `.c-static-analyzer.toml` |
+
+**Exit codes**
+
+| Code | Meaning |
+|------|---------|
+| `0` | No issues found |
+| `1` | One or more diagnostics reported |
+| `2` | Usage error (e.g. path does not exist) |
+
+**Sample output**
+
+```
+src/app.c:12:  [SA001] Function `parse_request` has cyclomatic complexity 14 (threshold 10)
+src/app.c:34:  [SA002] Local variable `unused` is assigned but never used
+src/util.c:48: [SA004] Function `convert` may not return a value on all code paths
+```
+
+By default the scanner skips common non-project directories: `.git`, `build`, `dist`, `cmake-build-debug`, `cmake-build-release`, `CMakeFiles`, `out`, `vendor`, `third_party`.
+
+---
 
 ## Configuration
 
-Settings can be set on the command line or in a `.c-static-analyzer.toml` file in (or above) the directory you're scanning from:
+Create a `.c-static-analyzer.toml` file in (or above) the directory you're scanning. CLI flags take precedence over file settings.
 
 ```toml
-exclude = ["tests/fixtures/*"]
+exclude        = ["tests/fixtures/*"]
 max_complexity = 10
-max_nesting = 4
-enabled_rules = ["SA001", "SA002", "SA004"]
+max_nesting    = 4
+enabled_rules  = ["SA001", "SA002", "SA004"]
 ```
 
-`enabled_rules` defaults to an empty list, which means all rules are enabled. CLI flags override the values loaded from `.c-static-analyzer.toml`.
+> `enabled_rules = []` (the default) means all rules are enabled.
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A([CLI  —  cli.rs]) --> B[Config loader\nconfig.rs]
+    A --> C[File walker\nanalyzer.rs]
+    C --> D[tree-sitter parser\ntree-sitter-c grammar]
+    D --> E[Syntax tree\nCST nodes]
+    E --> F[Rule engine\nvisitor.rs / rules/mod.rs]
+    F --> G1[SA001 Complexity]
+    F --> G2[SA002 Unused vars]
+    F --> G3[SA003 Nesting]
+    F --> G4[SA004 Missing return]
+    F --> G5[SA005 Unreachable]
+    G1 & G2 & G3 & G4 & G5 --> H[Diagnostic collector\ndiagnostics.rs]
+    H --> I([Sorted output\n+ exit code])
+
+    style D fill:#dde9ff,stroke:#5580cc
+    style F fill:#e8f5e9,stroke:#4caf50
+    style H fill:#fff8e1,stroke:#f9a825
+```
+
+**Data flow summary**
+
+1. The CLI reads flags and loads `.c-static-analyzer.toml` (unless `--no-config`).
+2. The file walker recursively discovers `.c`/`.h` files, applying exclude patterns.
+3. Each file is parsed by tree-sitter into a concrete syntax tree (CST) — no compilation needed.
+4. Enabled rules walk the CST via `tree_sitter::Node` traversal, emitting `Diagnostic` values.
+5. Diagnostics are sorted by file and line, rendered to stdout, and the process exits with the appropriate code.
+
+**Adding a new rule** — create `src/rules/saXXX_name.rs` implementing the rule trait, then register it in `src/rules/mod.rs`. No other files need to change.
+
+---
 
 ## Development
 
-Project structure:
+**Project layout**
 
-```text
+```
 c-static-analyzer/
-├── README.md
 ├── Cargo.toml
 ├── examples/
-│   └── sample_issues.c
+│   └── sample_issues.c          ← triggers every rule
 ├── src/
-│   ├── main.rs
-│   ├── lib.rs
-│   ├── cli.rs
-│   ├── analyzer.rs
-│   ├── visitor.rs
-│   ├── config.rs
-│   ├── diagnostics.rs
-│   ├── fnmatch.rs
+│   ├── main.rs                  ← entry point
+│   ├── lib.rs                   ← public API surface
+│   ├── cli.rs                   ← argument parsing & orchestration
+│   ├── analyzer.rs              ← file discovery & per-file analysis
+│   ├── visitor.rs               ← CST traversal helpers
+│   ├── config.rs                ← config loading & merging
+│   ├── diagnostics.rs           ← Diagnostic type & formatting
+│   ├── fnmatch.rs               ← glob/exclude matching
 │   └── rules/
-│       ├── mod.rs
+│       ├── mod.rs               ← rule registry
 │       ├── sa001_complexity.rs
 │       ├── sa002_unused_variables.rs
 │       ├── sa003_nesting.rs
@@ -115,62 +181,71 @@ c-static-analyzer/
     └── golden.rs
 ```
 
-Development commands:
+**Common commands**
 
 ```bash
-cargo build --release
-cargo test
-./target/release/c-static-analyzer scan examples/
+cargo build --release                              # production build
+cargo test                                         # run all tests
+./target/release/c-static-analyzer scan examples/ # smoke test
 ```
 
-## Design
-
-The analyzer uses [tree-sitter](https://tree-sitter.github.io/tree-sitter/) with the `tree-sitter-c` grammar via the [`tree-sitter`](https://crates.io/crates/tree-sitter) and [`tree-sitter-c`](https://crates.io/crates/tree-sitter-c) crates:
-
-1. Parse each `.c`/`.h` file into a concrete syntax tree.
-2. Run each enabled rule over the tree, walking `tree_sitter::Node`s with `child_by_field_name`.
-3. Collect diagnostics with rule IDs, messages, file paths, and line numbers.
-4. Sort and render results in a human-readable CLI format.
-5. Exit with a non-zero status when findings are present, making the tool usable in CI.
-
-Each rule lives in its own module under `src/rules/` and exposes a rule ID and a check function, so adding a new rule means adding one file and registering it in `rules/mod.rs`.
+---
 
 ## Test Results
 
-44 tests pass — 36 unit tests (rule logic, config loading, fnmatch, file discovery) plus 8 integration tests (CLI behavior and a byte-for-byte golden-output comparison against the project's reference fixture):
+44 tests pass: 36 unit tests covering rule logic, config loading, glob matching, and file discovery, plus 8 integration tests covering CLI behaviour and a byte-for-byte golden-output comparison.
 
-```text
+```
 $ cargo test
-...
-test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/analyzer.rs)
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/cli.rs)
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/golden.rs)
+
+running 36 tests ... ok
+test result: ok. 36 passed; 0 failed; 0 ignored   (lib / unit tests)
+
+test result: ok.  3 passed; 0 failed; 0 ignored   (tests/analyzer.rs)
+test result: ok.  4 passed; 0 failed; 0 ignored   (tests/cli.rs)
+test result: ok.  1 passed; 0 failed; 0 ignored   (tests/golden.rs)
 ```
 
-Running the analyzer on [examples/sample_issues.c](examples/sample_issues.c), a file written specifically to trigger every rule, confirms end-to-end behavior:
+Running the analyzer on [examples/sample_issues.c](examples/sample_issues.c) (a file written to trigger every rule) confirms end-to-end behaviour:
 
-```text
+```
 $ c-static-analyzer scan examples/sample_issues.c
-examples/sample_issues.c:3: SA001 Function `complex_calc` has cyclomatic complexity 12 (threshold 10)
-examples/sample_issues.c:18: SA004 Function `classify` may not return a value on all code paths
-examples/sample_issues.c:31: SA003 Control flow nested 5 levels deep (threshold 4)
-examples/sample_issues.c:41: SA002 Local variable `unused` is assigned but never used
-examples/sample_issues.c:45: SA005 Unreachable code after `return`
+
+examples/sample_issues.c:3:  [SA001] Function `complex_calc` has cyclomatic complexity 12 (threshold 10)
+examples/sample_issues.c:18: [SA004] Function `classify` may not return a value on all code paths
+examples/sample_issues.c:31: [SA003] Control flow nested 5 levels deep (threshold 4)
+examples/sample_issues.c:41: [SA002] Local variable `unused` is assigned but never used
+examples/sample_issues.c:45: [SA005] Unreachable code after `return`
 
 5 issue(s) found.
 ```
 
+---
+
 ## Roadmap
 
-- [x] Add project packaging with `Cargo.toml`.
-- [x] Implement the CLI entry point.
-- [x] Implement tree-sitter parsing for C files.
-- [x] Add diagnostic formatting.
-- [x] Add unit tests for each rule.
-- [x] Add configuration support.
-- [x] Add CI-friendly exit codes.
-- [ ] Add JSON output for editor and automation integrations.
+- [x] Project packaging (`Cargo.toml`)
+- [x] CLI entry point
+- [x] tree-sitter C parser integration
+- [x] Diagnostic formatting
+- [x] Unit tests for every rule
+- [x] Configuration file support
+- [x] CI-friendly exit codes
+- [ ] JSON output for editor and automation integrations
+- [ ] SARIF output for GitHub Code Scanning / other SAST platforms
+
+---
+
+## References
+
+- [tree-sitter](https://tree-sitter.github.io/tree-sitter/) — incremental parsing library used for CST construction
+- [tree-sitter-c](https://github.com/tree-sitter/tree-sitter-c) — C grammar for tree-sitter
+- [Cyclomatic Complexity (McCabe, 1976)](https://doi.org/10.1109/TSE.1976.233837) — metric used by SA001
+- [MISRA C](https://www.misra.org.uk/) — industry coding standard for C; a reference point for rule design
+- [Clang Static Analyzer](https://clang-analyzer.llvm.org/) — production-grade C/C++ analyzer; useful comparison point
+- [cppcheck](https://cppcheck.sourceforge.io/) — open-source C/C++ static analysis tool
+
+---
 
 ## License
 
