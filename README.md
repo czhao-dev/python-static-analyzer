@@ -222,20 +222,6 @@ examples/sample_issues.c:45: [SA005] Unreachable code after `return`
 
 ---
 
-## Roadmap
-
-- [x] Project packaging (`Cargo.toml`)
-- [x] CLI entry point
-- [x] tree-sitter C parser integration
-- [x] Diagnostic formatting
-- [x] Unit tests for every rule
-- [x] Configuration file support
-- [x] CI-friendly exit codes
-- [ ] JSON output for editor and automation integrations
-- [ ] SARIF output for GitHub Code Scanning / other SAST platforms
-
----
-
 ## References
 
 - [tree-sitter](https://tree-sitter.github.io/tree-sitter/) — incremental parsing library used for CST construction
